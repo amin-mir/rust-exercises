@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "statistics",
+    "pig-latin-enc",
+    "memanager",
+]
