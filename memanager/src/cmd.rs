@@ -52,5 +52,6 @@ fn parse_list<'a, T>(mut parts: T) -> Result<Cmd, Box<dyn Error>>
 where
     T: Iterator<Item = &'a str>,
 {
+    
     Ok(Cmd::Close)
 }
