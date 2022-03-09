@@ -18,7 +18,7 @@ pub fn encode(text: &str) -> String {
     for word in text.split_whitespace() {
         let cap = word.bytes().count();
         let chars: Vec<char> = word.chars().collect();
-        
+
         let s = if CONSONANTS.contains(&chars[0].to_uppercase().next().unwrap()) {
             let mut s = String::with_capacity(cap + 3);
             chars[1..].iter().for_each(|&c| s.push(c));

@@ -7,46 +7,36 @@
 //! For example:
 //! `Add Sally to Engineering`
 //! `Add Amir to Sales`
-//! `List all`
+//! `List All`
 //! `List Engineering`
 //! `Close`
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 
 mod cmd;
+use cmd::Cmd;
+
+mod db;
+use db::Db;
 
 // Employee, Department => HashMap<Department, Employee>
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let db: HashMap<String, String> = HashMap::new();
+    let mut db = Db::new();
 
-    // loop {
-    let mut buffer = String::new();
+    loop {
+        let mut buffer = String::new();
 
-    println!("Please go ahead and enter your command =>");
-    io::stdin().read_line(&mut buffer)?;
+        println!("Enter your command =>");
+        io::stdin().read_line(&mut buffer)?;
 
-    // parse a command out of string.
-    match cmd::parse(&buffer)? {
-        cmd::Cmd::Add {
-            employee,
-            department,
-        } => println!("request for adding {} to {}", employee, department),
-        _ => println!("command is not add"),
+        // parse a command out of string.
+        if !cmd::parse(&buffer).exec(&mut db) {
+            break;
+        }
     }
 
     Ok(())
-
-    // execute the command.
-    // }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
