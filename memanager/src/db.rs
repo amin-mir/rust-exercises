@@ -37,7 +37,7 @@ impl Db {
     pub fn get_all_empls(&self) -> impl Iterator<Item = &str> {
         self.db
             .iter()
-            .flat_map(|(dpt, empls)| empls.iter().map(|e| &**e))
+            .flat_map(|(_dpt, empls)| empls.iter().map(|e| &**e))
     }
 
     // get all employees with their department.

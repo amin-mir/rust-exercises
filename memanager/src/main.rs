@@ -10,13 +10,11 @@
 //! `List All`
 //! `List Engineering`
 //! `Close`
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+
 use std::error::Error;
 use std::io;
 
 mod cmd;
-use cmd::Cmd;
 
 mod db;
 use db::Db;
