@@ -5,4 +5,5 @@ members = [
     "pig-latin-enc",
     "memanager",
     "cacher",
+    "deref-enum-to-u8-slc",
 ]
