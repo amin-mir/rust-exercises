@@ -3,6 +3,10 @@
 version = 3
 
 [[package]]
+name = "cacher"
+version = "0.1.0"
+
+[[package]]
 name = "memanager"
 version = "0.1.0"
 
