@@ -9,6 +9,9 @@ fn main() {
     let b2 = Block::Cached(Arc::new(vec![5, 6, 7]));
     let a2 = &b2[..];
     println!("{:?}", a2);
+
+    // We can also call len due to automatic deref.
+    println!("{}", b1.len());
 }
 
 enum Block {

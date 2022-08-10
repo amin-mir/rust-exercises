@@ -7,6 +7,10 @@ name = "cacher"
 version = "0.1.0"
 
 [[package]]
+name = "data-structures"
+version = "0.1.0"
+
+[[package]]
 name = "deref-enum-to-u8-slc"
 version = "0.1.0"
 

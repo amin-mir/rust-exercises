@@ -6,4 +6,5 @@ members = [
     "memanager",
     "cacher",
     "deref-enum-to-u8-slc",
+    "data-structures",
 ]
