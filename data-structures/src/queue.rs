@@ -24,12 +24,6 @@ impl<T: Debug> Drop for Node<T> {
     }
 }
 
-// impl<T: fmt::Display> Display for Node<T> {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "{}", self.val)
-//     }
-// }
-
 impl<T: Debug> Node<T> {
     fn new(id: usize, val: T) -> Self {
         Self {
@@ -125,12 +119,6 @@ impl<T: Debug + Default> Queue<T> {
         self.head.as_ref()
             .zip(self.tail.as_ref())
             .map_or(false, |(head, tail)| head.borrow().id == tail.borrow().id)
-        // if self.head.is_none() || self.tail.is_none() {
-        //     return false;
-        // }
-        // let head = self.head.unwrap().borrow();
-        // let tail = self.tail.unwrap().borrow();
-        // head.id == tail.id
     }
 }
 
