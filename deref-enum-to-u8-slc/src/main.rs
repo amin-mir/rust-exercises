@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use core::ops::Deref;
+use std::sync::Arc;
 
 fn main() {
     let b1 = Block::Owned(vec![1, 3, 4]);
