@@ -6,8 +6,8 @@ type OptNode<T> = Option<Rc<RefCell<Node<T>>>>;
 
 #[derive(Debug)]
 pub struct Queue<T: Debug + Default> {
-    next_id: usize,
     head: OptNode<T>,
+    next_id: usize,
     tail: OptNode<T>,
 }
 
