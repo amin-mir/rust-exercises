@@ -59,9 +59,10 @@ impl Parser {
         let delim_end = tmpl.find("}}").expect("missing closing delimiters: }}");
         let key = tmpl[2..delim_end].trim();
 
-        let val = self.data.get(key).unwrap_or_else(|| {
-            panic!("couldn't find data corresponding to key: {}", key)
-        });
+        let val = self
+            .data
+            .get(key)
+            .unwrap_or_else(|| panic!("couldn't find data corresponding to key: {}", key));
         self.result.push_str(val);
 
         // returning index after the second closing '}'.

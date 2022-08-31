@@ -1,11 +1,12 @@
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use gotmpl::enum_parser::{parse, parse_cap};
 use gotmpl::simple_parser::parse as simple_parse;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use gotmpl::flexi_parser::{parse as fparse, parse_ref as fparse_ref};
 use std::collections::HashMap;
 
 pub fn string_builder_benchmark(c: &mut Criterion) {
     let tmpl = std::fs::read_to_string("templates/large.tmpl").unwrap();
-    
+
     let data = HashMap::from([
         ("name1".to_string(), "A1".to_string()),
         ("name2".to_string(), "A2".to_string()),
@@ -19,24 +20,43 @@ pub fn string_builder_benchmark(c: &mut Criterion) {
 
     group.bench_with_input(
         BenchmarkId::new("enum_parser/simple", "large_tmpl"),
-        &(tmpl.clone(), data.clone()), 
+        &(tmpl.clone(), data.clone()),
         |b, (tmpl, data)| {
             b.iter(|| parse(black_box(tmpl.clone()), black_box(data.clone())));
-        });
+        },
+    );
 
     group.bench_with_input(
         BenchmarkId::new("enum_parser/capacity", "large_tmpl"),
-        &(tmpl.clone(), data.clone()), 
+        &(tmpl.clone(), data.clone()),
         |b, (tmpl, data)| {
             b.iter(|| parse_cap(black_box(tmpl.clone()), black_box(data.clone())));
-        });
+        },
+    );
 
     group.bench_with_input(
-            BenchmarkId::new("simple_parser", "large_tmpl"),
-            &(tmpl.clone(), data.clone()), 
-            |b, (tmpl, data)| {
-                b.iter(|| simple_parse(black_box(tmpl.clone()), black_box(data.clone())));
-            });
+        BenchmarkId::new("simple_parser", "large_tmpl"),
+        &(tmpl.clone(), data.clone()),
+        |b, (tmpl, data)| {
+            b.iter(|| simple_parse(black_box(tmpl.clone()), black_box(data.clone())));
+        },
+    );
+
+    group.bench_with_input(
+        BenchmarkId::new("flexi_parser/parse", "large_tmpl"),
+        &(tmpl.clone(), data.clone()),
+        |b, (tmpl, data)| {
+            b.iter(|| fparse(black_box(tmpl.clone()), black_box(data.clone())));
+        },
+    );
+
+    group.bench_with_input(
+        BenchmarkId::new("flexi_parser/parse_ref", "large_tmpl"),
+        &(tmpl.clone(), data.clone()),
+        |b, (tmpl, data)| {
+            b.iter(|| fparse_ref(black_box(tmpl.clone()), black_box(data.clone())));
+        },
+    );
 
     group.finish();
 }

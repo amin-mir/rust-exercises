@@ -4,23 +4,21 @@ use iter::Iter;
 mod into_iter;
 use into_iter::IntoIter;
 
+use super::Result;
+
 #[derive(Debug, PartialEq)]
 pub enum Token<T> {
     Text(T),
     Placeholder(T),
 }
 
-type Result<T> = std::result::Result<T, String>;
-
 pub struct Tokens {
     tmpl: String,
 }
 
 impl Tokens {
-    pub fn new(tmpl: String) -> Self {
-        Tokens {
-            tmpl
-        }
+    pub fn from(tmpl: String) -> Self {
+        Tokens { tmpl }
     }
 
     pub fn iter(&self) -> Iter {
@@ -58,7 +56,7 @@ mod tests {
     fn iter() {
         let tmpl = String::from("Hello {{ name }} {{surname}}, Welcome!");
 
-        let tokens = Tokens::new(tmpl);
+        let tokens = Tokens::from(tmpl);
 
         let mut actual = Vec::new();
         for t in &tokens {
@@ -81,7 +79,7 @@ mod tests {
     fn into_iter() {
         let tmpl = String::from("Hello {{ name }} {{surname}}, Welcome!");
 
-        let tokens = Tokens::new(tmpl);
+        let tokens = Tokens::from(tmpl);
 
         let mut actual = Vec::new();
         for t in tokens {

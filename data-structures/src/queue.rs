@@ -116,7 +116,8 @@ impl<T: Debug + Default> Queue<T> {
     // Returns true if the queue only contains a single node.
     // In which case the head and tail point to the same node.
     fn is_single_node(&self) -> bool {
-        self.head.as_ref()
+        self.head
+            .as_ref()
             .zip(self.tail.as_ref())
             .map_or(false, |(head, tail)| head.borrow().id == tail.borrow().id)
     }

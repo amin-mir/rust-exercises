@@ -22,8 +22,8 @@ impl<'a> Iter<'a> {
             None => {
                 // There is a problem with template, therefore should stop iterating.
                 self.stop_iter();
-                return Err("missing closing delimiter: }}".to_owned())
-            },
+                return Err("missing closing delimiter: }}".to_owned());
+            }
             Some(idx) => idx,
         };
 
@@ -34,7 +34,7 @@ impl<'a> Iter<'a> {
     }
 
     fn stop_iter(&mut self) {
-        // Setting current index to the end of template, so that 
+        // Setting current index to the end of template, so that
         // there is nothing left to iterate through.
         self.cur_idx = self.tmpl.len();
     }
@@ -75,7 +75,7 @@ impl<'a> Iterator for Iter<'a> {
                 }
 
                 Some(Ok(cur))
-            },
+            }
         }
     }
 }
@@ -107,10 +107,13 @@ mod tests {
         let tmpl = String::from("Hello {{ name }} {{ surnamne  Welcome!");
 
         let mut tokens = Iter::new(&tmpl);
-        
+
         assert_eq!(tokens.next(), Some(Ok(Token::Text("Hello "))));
         assert_eq!(tokens.next(), Some(Ok(Token::Placeholder("name"))));
-        assert_eq!(tokens.next(), Some(Err("missing closing delimiter: }}".to_owned())));
+        assert_eq!(
+            tokens.next(),
+            Some(Err("missing closing delimiter: }}".to_owned()))
+        );
         assert_eq!(tokens.next(), None);
     }
 }
