@@ -9,4 +9,5 @@ members = [
     "data-structures",
     "gotmpl",
     "manfut",
+    "slow-reader",
 ]
