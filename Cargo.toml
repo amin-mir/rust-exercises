@@ -10,4 +10,5 @@ members = [
     "gotmpl",
     "manfut",
     "slow-reader",
+    "treiber-stack",
 ]
