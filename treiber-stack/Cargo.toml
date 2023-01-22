@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 crossbeam-epoch = "0.9.13"
+crossbeam-channel = "0.5.6"

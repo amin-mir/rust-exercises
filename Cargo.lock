@@ -651,6 +651,7 @@ dependencies = [
 name = "treiber-stack"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "crossbeam-epoch",
 ]
 
