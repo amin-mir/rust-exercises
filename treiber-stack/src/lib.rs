@@ -1,22 +1,27 @@
-use std::ptr;
+use std::{ptr, mem::ManuallyDrop};
 use std::sync::atomic::Ordering;
 
 use crossbeam_epoch::{self as epoch, Atomic};
 use epoch::Owned;
 
+pub struct Stack<T> {
+    head: Atomic<Node<T>>,
+}
+
 struct Node<T> {
-    data: T,
+    // ManuallyDrop inhibits the compiler from automatically calling
+    // the destructor for data. That's useful since we extract the data
+    // when pop is called and the caller will call the drop for that.
+    // But the Node is `defer_destroy`ed there as well. So if we don't
+    // use ManuallyDrop, it will result in double-free error.
+    data: ManuallyDrop<T>,
     prev: Atomic<Node<T>>,
 }
 
 impl<T> Node<T> {
     fn new(data: T, prev: Atomic<Node<T>>) -> Self {
-        Self { data, prev }
+        Self { data: ManuallyDrop::new(data), prev }
     }
-}
-
-pub struct Stack<T> {
-    head: Atomic<Node<T>>,
 }
 
 impl<T> Stack<T> {
@@ -33,11 +38,13 @@ impl<T> Stack<T> {
         let guard = epoch::pin();
 
         loop {
-            // TODO: what should the ordering be here?
             let old_head = self.head.load(Ordering::Acquire, &guard);
+
+            // This requires minimal synchronizatoin and can be Relaxed.
+            // Because if there's another push or pop before this method
+            // finishes, compare_exchange is going to fail.
             node.prev.store(old_head, Ordering::Relaxed);
 
-            // TODO: what should the orderings be here?
             match self.head.compare_exchange(
                 old_head,
                 node,
@@ -55,10 +62,21 @@ impl<T> Stack<T> {
         let guard = &epoch::pin();
 
         loop {
-            // What should the ordering be here?
             let old_head = self.head.load(Ordering::Acquire, guard);
 
+            // Alternatively instead of as_ref() which returns Option, we can
+            // manually check for null and then use deref(). But as_ref() is
+            // cleaner as it allows mixing with ? operator.
+            // if old_head.is_null() {
+            //     None
+            // }
+            // unsafe { old_head.deref() }
+
             let node = unsafe { old_head.as_ref()? };
+
+            // This requires minimal synchronizatoin and can be Relaxed.
+            // Because if there's another push or pop before this method
+            // finishes, compare_exchange is going to fail.
             let new_head = node.prev.load(Ordering::Relaxed, guard);
             let result = self.head.compare_exchange(
                 old_head,
@@ -69,8 +87,9 @@ impl<T> Stack<T> {
             );
             if result.is_ok() {
                 unsafe {
+                    let data = ptr::read(&node.data);
                     guard.defer_destroy(old_head);
-                    return Some(ptr::read(&node.data as *const T));
+                    return Some(ManuallyDrop::into_inner(data));
                 }
             }
         };
