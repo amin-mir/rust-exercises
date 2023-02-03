@@ -1,8 +1,8 @@
+use pin_utils::pin_mut;
 use std::io;
 use std::time::Instant;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use pin_utils::pin_mut;
 
 mod slow_reader;
 use slow_reader::SlowReader;

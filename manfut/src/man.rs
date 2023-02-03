@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{mpsc, Mutex, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
@@ -41,11 +41,9 @@ impl<T> ManualFuture<T> {
             ready_rx: Some(rx),
         };
 
-        let ready = move || {
-            match tx.send(()) {
-                Ok(_) => println!("successfully sent ready signal"),
-                Err(_) => println!("ERROR failed to send ready signal ERROR")
-            }
+        let ready = move || match tx.send(()) {
+            Ok(_) => println!("successfully sent ready signal"),
+            Err(_) => println!("ERROR failed to send ready signal ERROR"),
         };
 
         (fut, ready)
@@ -65,24 +63,21 @@ impl<T> Future for ManualFuture<T> {
             let this = self.as_mut().get_unchecked_mut();
             this.ready_rx.take()
         };
-        
+
         let mut inner = self.inner.lock().unwrap();
 
         match &inner.waker {
             None => {
                 inner.waker = Some(cx.waker().clone());
-                
 
-                thread::spawn(move || {
-                    match ready_rx.unwrap().recv() {
-                        Ok(_) => {
-                            println!("receive on the channel was ok");
-                            let mut inner = inner_cloned.lock().unwrap();
-                            inner.state = State::Ready;
-                            inner.waker.as_ref().unwrap().wake_by_ref();
-                        },
-                        Err(_) => println!("ERROR receive on the channel returned ERROR"),
+                thread::spawn(move || match ready_rx.unwrap().recv() {
+                    Ok(_) => {
+                        println!("receive on the channel was ok");
+                        let mut inner = inner_cloned.lock().unwrap();
+                        inner.state = State::Ready;
+                        inner.waker.as_ref().unwrap().wake_by_ref();
                     }
+                    Err(_) => println!("ERROR receive on the channel returned ERROR"),
                 });
             }
             Some(waker) => {
@@ -93,9 +88,7 @@ impl<T> Future for ManualFuture<T> {
         }
 
         match inner.state {
-            State::NotReady => {
-                Poll::Pending
-            }
+            State::NotReady => Poll::Pending,
             State::Ready => {
                 inner.state = State::Consumed;
 

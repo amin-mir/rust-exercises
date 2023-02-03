@@ -9,7 +9,7 @@ use man::ManualFuture;
 async fn main() {
     let res = "Final Result".to_owned();
     let (fut, ready) = ManualFuture::new(res);
-    
+
     let handle = tokio::spawn(async move {
         println!("a new task was spawned!");
         let res = fut.await;

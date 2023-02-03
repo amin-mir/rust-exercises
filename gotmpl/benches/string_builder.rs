@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use gotmpl::enum_parser::{parse, parse_cap};
-use gotmpl::simple_parser::parse as simple_parse;
 use gotmpl::flexi_parser::{parse as fparse, parse_ref as fparse_ref};
+use gotmpl::simple_parser::parse as simple_parse;
 use std::collections::HashMap;
 
 pub fn string_builder_benchmark(c: &mut Criterion) {

@@ -1,9 +1,9 @@
-use tokio::io::{AsyncRead, ReadBuf};
-use tokio::time::{self, Duration, Sleep, Instant};
-use std::io::Result;
 use std::future::{Future, Pending};
+use std::io::Result;
 use std::pin::Pin;
 use std::task::{self, Context, Poll};
+use tokio::io::{AsyncRead, ReadBuf};
+use tokio::time::{self, Duration, Instant, Sleep};
 
 pub struct SlowReader<R> {
     sleep: Sleep,
@@ -30,10 +30,7 @@ where
     ) -> task::Poll<Result<()>> {
         let (mut sleep, reader) = unsafe {
             let this = self.get_unchecked_mut();
-            (
-                Pin::new_unchecked(&mut this.sleep),
-                &mut this.reader,
-            )
+            (Pin::new_unchecked(&mut this.sleep), &mut this.reader)
         };
 
         match sleep.as_mut().poll(cx) {
