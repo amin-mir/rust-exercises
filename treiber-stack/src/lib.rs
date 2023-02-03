@@ -1,11 +1,41 @@
-use std::{ptr, mem::ManuallyDrop};
+use std::fmt::Debug;
+use std::mem::{self, ManuallyDrop};
+use std::ptr;
 use std::sync::atomic::Ordering;
 
 use crossbeam_epoch::{self as epoch, Atomic};
 use epoch::Owned;
 
-pub struct Stack<T> {
+pub struct Stack<T: Debug> {
     head: Atomic<Node<T>>,
+}
+
+// TODO: should T be Send as well?
+unsafe impl<T: Debug> Send for Stack<T> {}
+unsafe impl<T: Debug> Sync for Stack<T> {}
+
+impl<T: Debug> Drop for Stack<T> {
+    fn drop(&mut self) {
+        println!("inside drop");
+        let guard = &epoch::pin();
+
+        let mut current = mem::replace(&mut self.head, Atomic::null());
+        unsafe {
+            while let Some(node) = current.try_into_owned() {
+                // Alternatively, we can try the following, but we'll have to use
+                // std::ptr::read because node is Owned which doesn't implement Copy.
+                // let data = ptr::read(&mut node.data);
+                // drop(ManuallyDrop::into_inner(data));
+
+                let node = node.into_box();
+                println!("dropping {:?}", node.data);
+                drop(ManuallyDrop::into_inner(node.data));
+
+                let node = node.prev.load(Ordering::Relaxed, guard);
+                current = Atomic::from(node);
+            }
+        }
+    }
 }
 
 struct Node<T> {
@@ -20,11 +50,14 @@ struct Node<T> {
 
 impl<T> Node<T> {
     fn new(data: T, prev: Atomic<Node<T>>) -> Self {
-        Self { data: ManuallyDrop::new(data), prev }
+        Self {
+            data: ManuallyDrop::new(data),
+            prev,
+        }
     }
 }
 
-impl<T> Stack<T> {
+impl<T: Debug> Stack<T> {
     pub fn new() -> Self {
         Self {
             head: Atomic::null(),
@@ -42,7 +75,11 @@ impl<T> Stack<T> {
 
             // This requires minimal synchronizatoin and can be Relaxed.
             // Because if there's another push or pop before this method
-            // finishes, compare_exchange is going to fail.
+            // finishes, compare_exchange is going to fail. This is a sign that
+            // we can replace Atomic with Shared. But Shared is only valid for
+            // the lifetime of guard. So we should convert it to *const Node
+            // and store that instead of an Atomic. Then we can do Shared::from
+            // to go back to having a shared.
             node.prev.store(old_head, Ordering::Relaxed);
 
             match self.head.compare_exchange(
@@ -76,7 +113,11 @@ impl<T> Stack<T> {
 
             // This requires minimal synchronizatoin and can be Relaxed.
             // Because if there's another push or pop before this method
-            // finishes, compare_exchange is going to fail.
+            // finishes, compare_exchange is going to fail. This is a sign that
+            // we can replace Atomic with Shared. But Shared is only valid for
+            // the lifetime of guard. So we should convert it to *const Node
+            // and store that instead of an Atomic. Then we can do Shared::from
+            // to go back to having a shared.
             let new_head = node.prev.load(Ordering::Relaxed, guard);
             let result = self.head.compare_exchange(
                 old_head,
@@ -92,6 +133,6 @@ impl<T> Stack<T> {
                     return Some(ManuallyDrop::into_inner(data));
                 }
             }
-        };
+        }
     }
 }

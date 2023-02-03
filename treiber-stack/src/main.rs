@@ -1,5 +1,5 @@
-use std::thread;
 use std::sync::Arc;
+use std::thread;
 
 use crossbeam_channel;
 
@@ -29,7 +29,7 @@ fn main() {
             let mut stolen = vec![];
             let _ = popper_start_rx.recv();
             let id = thread::current().id();
-            for j in 0..105 {
+            for j in 0..100 {
                 if let Some(popped) = popper_stack.pop() {
                     stolen.push(format!("popper-{:?} iteration {} => {:?}", id, j, popped));
                 } else {
@@ -53,9 +53,6 @@ fn main() {
         for s in r {
             println!("{s}");
         }
-    }
-    if !stack.pop().is_none() {
-        println!("elements still left in the stack");
     }
 
     for h in push_handles {
