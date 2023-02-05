@@ -1,0 +1,10 @@
+[package]
+name = "michael-scott-q"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam-utils = "0.8.14"
+crossbeam-epoch = "0.9.13"

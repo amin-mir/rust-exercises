@@ -11,4 +11,5 @@ members = [
     "manfut",
     "slow-reader",
     "treiber-stack",
+    "michael-scott-q",
 ]
