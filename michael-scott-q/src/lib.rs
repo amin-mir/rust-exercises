@@ -1,39 +1,33 @@
-//! Michael-Scott Queue
-//! at the beginning the tail and head are pointing to the same
-//! dummy node. The fact that the head and tail are pointing to the 
+//! Michael-Scott Queue:
+//! At the beginning the tail and head are pointing to the same
+//! dummy node. The fact that the head and tail are pointing to the
 //! same node means that the queue is empty.
-//! push/enqueue to the tail. pop/dequeue from the head.
-//! there's always a dummy node in the queue which head points to.
-//! 
+//! `push/enqueue` to the tail. `pop/dequeue` from the head.
+//! There's always a dummy node in the queue which head points to.
+//!
 //! Push:
-//! cas tail.next to point to the new node.
-//! this cas should succeed. If it fails we retry.
-//! tail.next should be null. if it is not null, it means that it's 
+//! `cas` tail.next to point to the new node.
+//! This cas should succeed. If it fails we retry.
+//! tail.next should be null. if it is not null, it means that it's
 //! lagging behind and we need to do cleanup.
-//! cas tail to point to the new node. if this fails, we don't care.
-//! because the only way that this fails is if someone else did this already.
-//! in case of failure we generate more cleanup for futures operations
+//! `cas` tail to point to the new node. if this fails, we don't care.
+//! Because the only way that this fails is if someone else did this already.
+//! In case of failure we generate more cleanup for future operations
 //! possibly on different threads to take care of.
-//! any thread can help with this (cleanup) that comes along and realizes that
+//! Any thread can help with this (cleanup) that comes along and realizes that
 //! tail pointer is poiting to a node whose next pointer is not null.
-//! 
+//!
 //! Pop:
-//! read data from the next pointer of the dummy node (head.next.data).
-//! if dummy.next is null, the queue is empty.
-//! after reading the data, dummy.next become the new dummy/head node
-//! thus cas the head to point to dummy.next.
-//! drop the dummy node. 
-//! value should be read from head.next before doing the cas to 
-//! update the head.
-// TODO: implement Drop
-// Compare with the Kaist implementation.
-// Refactor code & comments.
-use std::sync::atomic::Ordering;
-use std::mem::MaybeUninit;
+//! Read data from the next pointer of the dummy node (head.next.data).
+//! If dummy.next is null, the queue is empty.
+//! After reading the data, dummy.next becomes the new dummy/head node
+//! thus `cas` the head to point to dummy.next. Then drop the dummy node.
 use std::fmt::Debug;
+use std::mem::MaybeUninit;
+use std::sync::atomic::Ordering;
 
+use crossbeam_epoch::{self, Atomic, Guard, Owned, Shared};
 use crossbeam_utils::CachePadded;
-use crossbeam_epoch::{self, Atomic, Owned, Shared, Guard};
 
 pub struct Queue<T: Debug> {
     head: CachePadded<Atomic<Node<T>>>,
@@ -41,31 +35,30 @@ pub struct Queue<T: Debug> {
 }
 pub struct Node<T> {
     data: MaybeUninit<T>,
-    next: Atomic<Node<T>>
+    next: Atomic<Node<T>>,
 }
 
+// TODO: should T be Send?
 unsafe impl<T: Debug> Send for Queue<T> {}
 unsafe impl<T: Debug> Sync for Queue<T> {}
 
 impl<T: Debug> Drop for Queue<T> {
     fn drop(&mut self) {
-        // Alternatively, we can take ownership of head like below:
-        // let head = std::mem::replace(self.head, CachedPadded(Atomic::null));
-        // let head = head.into_inner();
-        let guard = unsafe { crossbeam_epoch::unprotected() };
-        let mut head = unsafe { self.head.load(Ordering::Relaxed, guard).into_owned() };
-        // let head_ref = unsafe { head.deref() };
-        // head doesn't have any data, but if has a next we should drop
-        // the data AND the container node.
-        let next = std::mem::replace(&mut head.next, Atomic::null());
-        let mut next = unsafe { next.try_into_owned() };
+        let head = std::mem::take(&mut *self.head);
+
+        let head = unsafe { head.into_owned() }.into_box();
+        let mut next = unsafe { head.next.try_into_owned() };
+
         while let Some(current) = next {
             // drop is called automatically for Box. Another property
             // of Box is it gets dereferenced to its target, meaning
-            // that we get ownership of Node and can call assume_init(_drop).
+            // that we get &mut of Node and can call assume_init(_drop).
             let current = current.into_box();
+
+            // Drop the data.
             let _ = unsafe { current.data.assume_init() };
             // println!("dropping {:?}", data);
+
             next = unsafe { current.next.try_into_owned() };
         }
     }
@@ -103,7 +96,8 @@ impl<T: Debug> Queue<T> {
         let new = Owned::new(Node {
             data: MaybeUninit::new(data),
             next: Atomic::null(),
-        }).into_shared(guard);
+        })
+        .into_shared(guard);
 
         loop {
             let tail = self.tail.load(Ordering::Acquire, guard);
@@ -112,20 +106,36 @@ impl<T: Debug> Queue<T> {
             let tail_ref = unsafe { tail.deref() };
 
             let next = tail_ref.next.load(Ordering::Acquire, guard);
-            
+
             // Help with the cleanup when tail is lagging behind.
             if !next.is_null() {
                 // We don't care whether success or failure. If it succeeds it means
-                // that we moved the tail to the tail.next and now we need the next 
+                // that we moved the tail to the tail.next and now we need the next
                 // for the new tail so start the loop again. If we failed, it means
                 // someone else has done this for us, so we need to load the tail and
                 // tail.next again.
-                let _ = self.tail.compare_exchange(tail, next, Ordering::Release, Ordering::Relaxed, guard);
+                let _ = self.tail.compare_exchange(
+                    tail,
+                    next,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                    guard,
+                );
                 continue;
             }
 
             // Change tail.next to point to new if still null.
-            if tail_ref.next.compare_exchange(Shared::null(), new, Ordering::Release, Ordering::Relaxed, guard).is_err() {
+            if tail_ref
+                .next
+                .compare_exchange(
+                    Shared::null(),
+                    new,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                    guard,
+                )
+                .is_err()
+            {
                 // If it fails, it means that tail.next is no longer null.
                 continue;
             }
@@ -133,7 +143,9 @@ impl<T: Debug> Queue<T> {
             // change tail to point to next. We don't care about the result of this
             // operation. If it fails, it means another thread helped with the cleanup
             // and moved the tail already.
-            let _ = self.tail.compare_exchange(tail, new, Ordering::Release, Ordering::Relaxed, guard);
+            let _ =
+                self.tail
+                    .compare_exchange(tail, new, Ordering::Release, Ordering::Relaxed, guard);
             break;
         }
     }
@@ -141,27 +153,6 @@ impl<T: Debug> Queue<T> {
     fn try_pop(&self, guard: &Guard) -> Option<T> {
         loop {
             let head = self.head.load(Ordering::Acquire, guard);
-            let tail = self.tail.load(Ordering::Acquire, guard);
-
-            // if head and tail are the same
-            // and tail.next is not null, move the tail.
-            // otherwise the list is empty.
-            if head == tail {
-                // Alternatively, we can use as_ref with ? which is compatible with
-                // the function signature but we know for a fact that tail cannot be null.
-                let tail_ref = unsafe { tail.deref() };
-                let next = tail_ref.next.load(Ordering::Acquire, guard);
-
-                // There's only the dummy node in the queue so it's empty.
-                if next.is_null() {
-                    return None;
-                }
-
-                // We will continue in case of success or failure. In case of failure
-                // it means someone else move the tail futher, by a push or something.
-                let _ = self.tail.compare_exchange(tail, next, Ordering::Release, Ordering::Relaxed, guard);
-            }
-
             // We know for a fact that head is the dummy node so it cannot be empty.
             // Alternatively, we could use as_ref with ? which is compatible with the
             // function signature as well.
@@ -170,7 +161,30 @@ impl<T: Debug> Queue<T> {
             // If head doesn't have a next anymore (someone popped in the meanwhile)
             // the list is empty.
             let next_ref = unsafe { next.as_ref() }?;
-            if self.head.compare_exchange(head, next, Ordering::Release, Ordering::Relaxed, guard).is_err() {
+
+            // TODO: can we use Relaxed here?
+            let tail = self.tail.load(Ordering::Acquire, guard);
+
+            // if head and tail are the same
+            // and tail.next is not null, move the tail.
+            // otherwise the list is empty.
+            if head == tail {
+                // We will continue in case of success or failure. In case of failure
+                // it means someone else move the tail futher, by a push or something.
+                let _ = self.tail.compare_exchange(
+                    tail,
+                    next,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                    guard,
+                );
+            }
+
+            if self
+                .head
+                .compare_exchange(head, next, Ordering::Release, Ordering::Relaxed, guard)
+                .is_err()
+            {
                 // If head is not the same, we need to retry.
                 continue;
             }
