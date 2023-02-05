@@ -5,7 +5,7 @@
 //! push/enqueue to the tail. pop/dequeue from the head.
 //! there's always a dummy node in the queue which head points to.
 //! 
-//! push:
+//! Push:
 //! cas tail.next to point to the new node.
 //! this cas should succeed. If it fails we retry.
 //! tail.next should be null. if it is not null, it means that it's 
@@ -17,7 +17,7 @@
 //! any thread can help with this (cleanup) that comes along and realizes that
 //! tail pointer is poiting to a node whose next pointer is not null.
 //! 
-//! pop:
+//! Pop:
 //! read data from the next pointer of the dummy node (head.next.data).
 //! if dummy.next is null, the queue is empty.
 //! after reading the data, dummy.next become the new dummy/head node
@@ -25,12 +25,17 @@
 //! drop the dummy node. 
 //! value should be read from head.next before doing the cas to 
 //! update the head.
-use std::{mem::MaybeUninit, sync::atomic::Ordering};
+// TODO: implement Drop
+// Compare with the Kaist implementation.
+// Refactor code & comments.
+use std::sync::atomic::Ordering;
+use std::mem::MaybeUninit;
+use std::fmt::Debug;
 
 use crossbeam_utils::CachePadded;
 use crossbeam_epoch::{self, Atomic, Owned, Shared, Guard};
 
-pub struct Queue<T> {
+pub struct Queue<T: Debug> {
     head: CachePadded<Atomic<Node<T>>>,
     tail: CachePadded<Atomic<Node<T>>>,
 }
@@ -39,10 +44,34 @@ pub struct Node<T> {
     next: Atomic<Node<T>>
 }
 
-unsafe impl<T> Send for Queue<T> {}
-unsafe impl<T> Sync for Queue<T> {}
+unsafe impl<T: Debug> Send for Queue<T> {}
+unsafe impl<T: Debug> Sync for Queue<T> {}
 
-impl<T> Queue<T> {
+impl<T: Debug> Drop for Queue<T> {
+    fn drop(&mut self) {
+        // Alternatively, we can take ownership of head like below:
+        // let head = std::mem::replace(self.head, CachedPadded(Atomic::null));
+        // let head = head.into_inner();
+        let guard = unsafe { crossbeam_epoch::unprotected() };
+        let mut head = unsafe { self.head.load(Ordering::Relaxed, guard).into_owned() };
+        // let head_ref = unsafe { head.deref() };
+        // head doesn't have any data, but if has a next we should drop
+        // the data AND the container node.
+        let next = std::mem::replace(&mut head.next, Atomic::null());
+        let mut next = unsafe { next.try_into_owned() };
+        while let Some(current) = next {
+            // drop is called automatically for Box. Another property
+            // of Box is it gets dereferenced to its target, meaning
+            // that we get ownership of Node and can call assume_init(_drop).
+            let current = current.into_box();
+            let _ = unsafe { current.data.assume_init() };
+            // println!("dropping {:?}", data);
+            next = unsafe { current.next.try_into_owned() };
+        }
+    }
+}
+
+impl<T: Debug> Queue<T> {
     pub fn new() -> Self {
         let dummy = Owned::new(Node {
             data: MaybeUninit::uninit(),
@@ -308,6 +337,7 @@ mod tests {
 
     #[test]
     fn push_try_pop_many_mpmc() {
+        #[derive(Debug)]
         enum LR {
             Left(i64),
             Right(i64),
@@ -387,7 +417,7 @@ mod tests {
     // try_pop makes calling try_pop on the Queue convenient.
     // Because it expected a &Guard and this function takes
     // care of providing that.
-    fn try_pop<T>(q: &Queue<T>) -> Option<T> {
+    fn try_pop<T: Debug>(q: &Queue<T>) -> Option<T> {
         let guard = &crossbeam_epoch::pin();
         q.try_pop(guard)
     }
