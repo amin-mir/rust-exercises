@@ -12,4 +12,6 @@ members = [
     "slow-reader",
     "treiber-stack",
     "michael-scott-q",
+    "harris-michael-list",
+    "lazy-transform-lf",
 ]
