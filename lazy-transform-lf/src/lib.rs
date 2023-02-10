@@ -191,7 +191,13 @@ where
     pub fn get<'g>(&self, guard: &'g Guard<'_>) -> Option<&'g T> {
         let cur_src_ctx = guard.protect(&self.src_ctx, Ordering::Acquire);
 
-        let src_ref = unsafe { &(*cur_src_ctx).source };
+        let src_ref = unsafe {
+            if cur_src_ctx.is_null() {
+                None
+            } else {
+                Some(&(*cur_src_ctx).source)
+            }
+        };
         if src_ref.is_some() {
             match self.do_transform(guard, cur_src_ctx) {
                 Some(val) => return Some(val),
@@ -462,5 +468,15 @@ mod tests {
             "set_source compare_exchange failure outdated count ={}",
             failure_outdated_count
         );
+    }
+
+    #[test]
+    fn get_first_call() {
+
+        let lt = LazyTransform::new(string_transform);
+
+        let glt = lt.guard();
+        let val = glt.get();
+        assert!(val.is_none());
     }
 }
