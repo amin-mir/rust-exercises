@@ -3,6 +3,7 @@
 // new value which should be cached and served in get_transformed. The
 // calculation should not happen until get_transformed is called.
 
+use std::default;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
@@ -81,7 +82,7 @@ where
 
         if !val_ctx.is_null() {
             unsafe {
-                guard.retire(val_ctx, reclaim::boxed::<T>);
+                guard.retire(val_ctx, reclaim::boxed::<ValueContext<T>>);
             }
         }
         if !src_ctx.is_null() {
@@ -190,14 +191,11 @@ where
 
     pub fn get<'g>(&self, guard: &'g Guard<'_>) -> Option<&'g T> {
         let cur_src_ctx = guard.protect(&self.src_ctx, Ordering::Acquire);
+        if cur_src_ctx.is_null() {
+            return None;
+        }
 
-        let src_ref = unsafe {
-            if cur_src_ctx.is_null() {
-                None
-            } else {
-                Some(&(*cur_src_ctx).source)
-            }
-        };
+        let src_ref = unsafe { &(*cur_src_ctx).source };
         if src_ref.is_some() {
             match self.do_transform(guard, cur_src_ctx) {
                 Some(val) => return Some(val),
@@ -206,16 +204,17 @@ where
         }
 
         let val_ctx = guard.protect(&self.val_ctx, Ordering::Acquire);
-        unsafe {
-            if val_ctx.is_null() {
-                None
-            } else {
-                Some(&(**val_ctx).val)
-            }
+        if val_ctx.is_null() {
+            return None;
         }
+        unsafe { Some(&(**val_ctx).val) }
     }
 
-    fn do_transform<'g>(&self, guard: &'g Guard<'_>, cur_src_ctx: *mut Linked<SourceContext<T>>) -> Option<&'g T> {
+    fn do_transform<'g>(
+        &self,
+        guard: &'g Guard<'_>,
+        cur_src_ctx: *mut Linked<SourceContext<T>>,
+    ) -> Option<&'g T> {
         match self.take_source(guard, cur_src_ctx) {
             None => None,
             Some(cur_src) => {
@@ -225,7 +224,7 @@ where
                     let src = &(*cur_src);
                     (src.seq, src.source.as_ref().unwrap())
                 };
-                
+
                 // Perform the potentially expensive calculation.
                 let new_val = (self.transform)(src);
                 Some(self.store_val(guard, seq, new_val))
@@ -233,11 +232,13 @@ where
         }
     }
 
-    fn take_source<'g>(&self, guard: &'g Guard<'_>, mut cur_src_ctx: *mut Linked<SourceContext<T>>) -> Option<*mut Linked<SourceContext<T>>> {
+    fn take_source<'g>(
+        &self,
+        guard: &'g Guard<'_>,
+        mut cur_src_ctx: *mut Linked<SourceContext<T>>,
+    ) -> Option<*mut Linked<SourceContext<T>>> {
         let seq = unsafe { &(*cur_src_ctx) }.seq;
-        let new_src_ctx = self
-            .collector
-            .link_boxed(SourceContext::new(seq, None));
+        let new_src_ctx = self.collector.link_boxed(SourceContext::new(seq, None));
 
         loop {
             match self.src_ctx.compare_exchange(
@@ -257,17 +258,12 @@ where
                     // It's safe to retire the cur_src here even though we're returning a reference
                     // to it to the caller. The reason is that we're calling retire on guard which
                     // ensures that that retirement happens after the guard is dropped.
-                    unsafe {
-                        guard.retire(
-                            cur_src,
-                            reclaim::boxed::<SourceContext<T>>,
-                        )
-                    };
+                    unsafe { guard.retire(cur_src, reclaim::boxed::<SourceContext<T>>) };
 
                     return Some(cur_src);
                 }
                 Err(cur_src) => {
-                    let (cur_seq, cur_source) = unsafe { 
+                    let (cur_seq, cur_source) = unsafe {
                         let cur = &(*cur_src);
                         (cur.seq, cur.source.as_ref())
                     };
@@ -288,6 +284,7 @@ where
                             // mutable reference to it.
                             unsafe { &mut (**new_src_ctx) }.seq = cur_seq;
                             cur_src_ctx = cur_src;
+
                         } else {
                             // Means that there is a newer source, but some other thread
                             // has already take the responsibility of performing the transform.
@@ -305,9 +302,7 @@ where
                         // The thread with successful CAS should take care of retiring the
                         // cur_src_ctx at the end.
                         assert!(cur_source.is_none());
-                        unsafe {
-                            guard.retire(new_src_ctx, reclaim::boxed::<SourceContext<T>>)
-                        };
+                        unsafe { guard.retire(new_src_ctx, reclaim::boxed::<SourceContext<T>>) };
                         return None;
                     }
                 }
@@ -324,65 +319,61 @@ where
             .link_boxed(ValueContext::new(new_seq, new_val));
 
         let mut cur_val_ctx = guard.protect(&self.val_ctx, Ordering::Acquire);
-        let (cur_seq, cur_val) = unsafe {
-            let cur = &(*cur_val_ctx);
-            (cur.seq, &cur.val)
-        };
 
-        // When sequence number of current value is greater than the one we used during
-        // transform, someone else has already done the calcuation with a newer source.
-        // So we can retire new_val_ctx. 
-        if new_seq < cur_seq {
-            // Using guard to delay retiring until the guard is dropped.
-            unsafe { guard.retire(new_val_ctx, reclaim::boxed::<ValueContext<T>>) };
-            return cur_val;
-        } else {
-            // We have a more up-to-date value so we attemp to over-write the current one.
-            loop {
-                match self.val_ctx.compare_exchange(
-                    cur_val_ctx,
-                    new_val_ctx,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // Ok will contain a ptr that is equal to cur_val_ctx so we 
-                        // just ignore that.
-                        //
-                        // We've successfully stored the value we calculated, so we can retire cur_val_ctx
-                        unsafe {
-                            guard.retire(
-                                cur_val_ctx,
-                                reclaim::boxed::<ValueContext<T>>,
-                            )
-                        };
+        if !cur_val_ctx.is_null() {
+            let (cur_seq, cur_val) = unsafe {
+                let cur = &(*cur_val_ctx);
+                (cur.seq, &cur.val)
+            };
 
-                        return unsafe { &(*new_val_ctx).val };
+            assert_ne!(new_seq, cur_seq);
+
+            // When sequence number of current value is greater than the one we used during
+            // transform, someone else has already done the calcuation with a newer source.
+            // So we can retire new_val_ctx.
+            if new_seq < cur_seq {
+                // Using guard to delay retiring until the guard is dropped.
+                unsafe { guard.retire(new_val_ctx, reclaim::boxed::<ValueContext<T>>) };
+                return cur_val;
+            }
+        }
+
+        // We have a more up-to-date value so we attemp to over-write the current one.
+        loop {
+            match self.val_ctx.compare_exchange(
+                cur_val_ctx,
+                new_val_ctx,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // Ok will contain a ptr that is equal to cur_val_ctx so we just ignore that.
+                    // We've successfully stored the value we calculated, so we can retire cur_val_ctx.
+                    // cur_val_ctx would be null the first time we do the transform and attempt to store it.
+                    if !cur_val_ctx.is_null() {
+                        unsafe { guard.retire(cur_val_ctx, reclaim::boxed::<ValueContext<T>>) };
                     }
-                    Err(cur_val) => {
-                        let old_seq = unsafe { &(*cur_val) }.seq;
 
-                        // `new_seq == old_seq` is impossible because there's no way that two threads
-                        // can take on the responsibility of calculating the value with same seq.
-                        assert_ne!(new_seq, old_seq);
+                    return unsafe { &(*new_val_ctx).val };
+                }
+                Err(cur_val) => {
+                    let old_seq = unsafe { &(*cur_val) }.seq;
 
-                        if new_seq > old_seq {
-                            // We have value with newer sequence number and coming here
-                            // means that someone else with older value managed to do the CAS
-                            // first so we should retry.
-                            cur_val_ctx = cur_val;
-                        } else {
-                            // Someone with newer value already succeeded so we can retire our
-                            // new_val. And then return the current value.
-                            unsafe {
-                                guard.retire(
-                                    new_val_ctx,
-                                    reclaim::boxed::<ValueContext<T>>,
-                                )
-                            };
+                    // `new_seq == old_seq` is impossible because there's no way that two threads
+                    // can take on the responsibility of calculating the value with same seq.
+                    assert_ne!(new_seq, old_seq);
 
-                            return unsafe { &(**cur_val).val };
-                        }
+                    if new_seq > old_seq {
+                        // We have value with newer sequence number and coming here
+                        // means that someone else with older value managed to do the CAS
+                        // first so we should retry.
+                        cur_val_ctx = cur_val;
+                    } else {
+                        // Someone with newer value already succeeded so we can retire our
+                        // new_val. And then return the current value.
+                        unsafe { guard.retire(new_val_ctx, reclaim::boxed::<ValueContext<T>>) };
+
+                        return unsafe { &(**cur_val).val };
                     }
                 }
             }
@@ -409,7 +400,9 @@ where
 mod tests {
     use super::*;
 
+    use rand::Rng;
     use std::thread;
+    use std::time::Duration;
 
     const CONC_CALL_COUNT: usize = 1_000_000;
 
@@ -472,11 +465,41 @@ mod tests {
 
     #[test]
     fn get_first_call() {
-
         let lt = LazyTransform::new(string_transform);
 
         let glt = lt.guard();
         let val = glt.get();
         assert!(val.is_none());
+    }
+
+    #[test]
+    fn get_should_return_some_after_set_source() {
+        let lt = LazyTransform::new(string_transform);
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                rand_sleep(30, 200);
+                lt.set_source("value".to_owned());
+            });
+
+            for _ in 0..3 {
+                s.spawn(|| {
+                    let glt = lt.guard();
+                    loop {
+                        let val = glt.get();
+                        if let Some(val) = val {
+                            assert_eq!(val, "value - extended!!!");
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    fn rand_sleep(min: u64, max: u64) {
+        let mut rng = rand::thread_rng();
+        let dur = rng.gen_range(min..max);
+        thread::sleep(Duration::from_millis(dur));
     }
 }
