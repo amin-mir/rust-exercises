@@ -188,19 +188,25 @@ where
         GuardedLazyTransform { guard, lt: self }
     }
 
-    pub fn get<'g>(&self, guard: &'g Guard<'_>) -> &'g T {
+    pub fn get<'g>(&self, guard: &'g Guard<'_>) -> Option<&'g T> {
         let cur_src_ctx = guard.protect(&self.src_ctx, Ordering::Acquire);
 
         let src_ref = unsafe { &(*cur_src_ctx).source };
         if src_ref.is_some() {
             match self.do_transform(guard, cur_src_ctx) {
-                Some(val) => return val,
+                Some(val) => return Some(val),
                 None => (),
             }
         }
 
         let val_ctx = guard.protect(&self.val_ctx, Ordering::Acquire);
-        unsafe { &(**val_ctx).val }
+        unsafe {
+            if val_ctx.is_null() {
+                None
+            } else {
+                Some(&(**val_ctx).val)
+            }
+        }
     }
 
     fn do_transform<'g>(&self, guard: &'g Guard<'_>, cur_src_ctx: *mut Linked<SourceContext<T>>) -> Option<&'g T> {
@@ -388,7 +394,7 @@ where
     T: Debug,
     F: Fn(&T) -> T,
 {
-    pub fn get(&self) -> &T {
+    pub fn get(&self) -> Option<&T> {
         self.lt.get(&self.guard)
     }
 }
