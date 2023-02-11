@@ -2,8 +2,6 @@
 // set_source gets a source which can be passed to transformFn to get the
 // new value which should be cached and served in get_transformed. The
 // calculation should not happen until get_transformed is called.
-
-use std::default;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
@@ -57,17 +55,18 @@ where
     }
 }
 
-// impl<T: Debug> Drop for SourceContext<T> {
-//     fn drop(&mut self) {
-//         println!("dropping source context with seq={}, source={:?}", self.seq, self.source);
-//     }
-// }
+impl<T: Debug> Drop for ValueContext<T> {
+    fn drop(&mut self) {
+        println!("dropping value context with seq={}, value={:?}", self.seq, self.val);
+    }
+}
 
 impl<F, T> Drop for LazyTransform<F, T>
 where
     T: Debug,
 {
     fn drop(&mut self) {
+        println!("dropping lazy transform");
         // SAFETY: because we have a &mut to self, it's safe to drop
         // everything immediate as Rust guarantees that no one else
         // will have a reference to self. And because of this, we won't
@@ -189,7 +188,7 @@ where
         GuardedLazyTransform { guard, lt: self }
     }
 
-    pub fn get<'g>(&self, guard: &'g Guard<'_>) -> Option<&'g T> {
+    pub fn get<'g>(&self, guard: &'g Guard<'g>) -> Option<&'g T> {
         let cur_src_ctx = guard.protect(&self.src_ctx, Ordering::Acquire);
         if cur_src_ctx.is_null() {
             return None;
@@ -212,7 +211,7 @@ where
 
     fn do_transform<'g>(
         &self,
-        guard: &'g Guard<'_>,
+        guard: &'g Guard<'g>,
         cur_src_ctx: *mut Linked<SourceContext<T>>,
     ) -> Option<&'g T> {
         match self.take_source(guard, cur_src_ctx) {
@@ -234,7 +233,7 @@ where
 
     fn take_source<'g>(
         &self,
-        guard: &'g Guard<'_>,
+        guard: &'g Guard<'g>,
         mut cur_src_ctx: *mut Linked<SourceContext<T>>,
     ) -> Option<*mut Linked<SourceContext<T>>> {
         let seq = unsafe { &(*cur_src_ctx) }.seq;
@@ -401,6 +400,7 @@ mod tests {
     use super::*;
 
     use rand::Rng;
+    use std::collections::HashSet;
     use std::thread;
     use std::time::Duration;
 
@@ -484,8 +484,8 @@ mod tests {
 
             for _ in 0..3 {
                 s.spawn(|| {
-                    let glt = lt.guard();
                     loop {
+                        let glt = lt.guard();
                         let val = glt.get();
                         if let Some(val) = val {
                             assert_eq!(val, "value - extended!!!");
@@ -494,6 +494,100 @@ mod tests {
                     }
                 });
             }
+        });
+    }
+
+    #[test]
+    fn retirement_works_correctly() {
+        let lt = LazyTransform::new(string_transform);
+
+        {
+            let glt = lt.guard();
+            assert!(glt.get().is_none());
+        }
+        
+        lt.set_source("old source".to_owned());
+
+        {
+            let glt = lt.guard();
+            assert_eq!(glt.get().unwrap(), "old source - extended!!!");
+        }
+
+        thread::sleep(Duration::from_millis(100));
+        lt.set_source("new source".to_owned());
+
+        thread::sleep(Duration::from_millis(100));
+        {
+            let glt = lt.guard();
+            assert_eq!(glt.get().unwrap(), "new source - extended!!!");
+        }
+    }
+
+    #[test]
+    fn get_many_concurrent_calls() {
+        // have a couple of set_source callers call that function with random
+        // delay each time. At the same time, have many readers, call get
+        // and the end number from any of the writers is seen, then call get
+        // for another 1000 times. And finally report the unique numbers seen
+        // by each getter which should be the same number depending on the configuration
+        // of the set_source callers.
+        let lt = LazyTransform::new(|src: &(String, usize)| {
+            // Randomly wait to simulate expensive transformation.
+            let mut rng = rand::thread_rng();
+            let dur = rng.gen_range(10..300);
+            thread::sleep(Duration::from_millis(dur));
+            (src.0.to_owned(), src.1)
+        });
+
+        thread::scope(|s| {
+            let mut get_handles = vec![];
+
+            for i in 0..30 {
+                if i % 3 == 0 {
+                    s.spawn(|| {
+                        for i in 0..20 {
+                        let mut rng = rand::thread_rng();
+                            let dur = rng.gen_range(50..200);
+                            thread::sleep(Duration::from_millis(dur));
+                            lt.set_source((format!("{:?}", thread::current().id()), i));
+                        }
+                    });
+                }
+
+                let h = s.spawn(|| {
+                    let mut seen: HashSet<(String, usize)> = HashSet::new();
+
+                    // Loop until see the last source from any of the writer threads.
+                    loop {
+                        let glt = lt.guard();
+                        let val = glt.get();
+                        if let Some(val) = val {
+                            seen.insert((val.0.clone(), val.1));
+                            if val.1 == 19 {
+                                break;
+                            }
+                        }
+                    }
+
+                    for _ in 0..1000 {
+                        // At this point we know for sure that there should always be a value.
+                        let glt = lt.guard();
+                        let val = glt.get().unwrap();
+                        seen.insert((val.0.clone(), val.1));
+                    }
+
+                    seen
+                });
+
+                get_handles.push(h);
+            }
+
+            for h in get_handles {
+                h.join().unwrap();
+            }
+
+            let glt = lt.guard();
+            assert_eq!(glt.get().unwrap().1, 19);
         });
     }
 
